@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>目的地選択ルート検索</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    #map { height: 90vh; }
+    #controls { padding: 10px; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <label for="destination">目的地を選択:</label>
+    <select id="destination">
+      <option value="" disabled selected>目的地を選択</option>
+    </select>
+    <button onclick="getRoute()">ルート検索</button>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    // 目的地リスト（岐阜駅、三重駅、名古屋駅）
+    const destinations = [
+      { name: "「君の名は。」 宮水神社のモデル 気多若宮神社", lat: 36.239437, lng: 137.197881 },
+      { name: "「君の名は。」 図書館 飛騨市図書館", lat: 36.238024, lng: 137.185309 },
+      { name: "「氷菓」 喫茶店一二三のモデル 喫茶去かつて", lat: 36.141715059490906,  lng: 137.25954296079325 },
+      { name: "「聲の形」 滝 養老の滝", lat: 35.28038826384124,  lng: 136.53426436031046 }
+    ];
+
+    // Leaflet地図の設定（初期位置は名古屋駅周辺）
+    const map = L.map('map').setView([35.1709, 136.8815], 13);  
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let userMarker;
+    let routeLine;
+
+    // 現在地を取得してマーカーを設定
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(position => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        userMarker = L.marker([lat, lng]).addTo(map).bindPopup("現在地");
+        map.setView([lat, lng], 13);  // 現在地を地図の中心に設定
+
+        // 現在地から目的地の距離を計算して、並べ替える
+        updateDestinationList(lat, lng);
+      });
+    } else {
+      alert("現在地を取得できませんでした。");
+    }
+
+    // 現在地から目的地までの距離を計算する関数（Haversine formula）
+    function calculateDistance(lat1, lng1, lat2, lng2) {
+      const R = 6371; // 地球の半径（キロメートル）
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c; // 距離（キロメートル）
+    }
+
+    // 目的地リストを現在地から近い順に並べ替える
+    function updateDestinationList(lat, lng) {
+      const sortedDestinations = destinations.map(dest => {
+        const distance = calculateDistance(lat, lng, dest.lat, dest.lng);
+        return { ...dest, distance };
+      })
+      .sort((a, b) => a.distance - b.distance); // 距離でソート
+
+      // ソートされた目的地をドロップダウンメニューに反映
+      const destinationSelect = document.getElementById("destination");
+      destinationSelect.innerHTML = '<option value="" disabled selected>目的地を選択</option>';  // 初期化
+      sortedDestinations.forEach(dest => {
+        const option = document.createElement("option");
+        option.value = dest.name;
+        option.text = `${dest.name} (距離: ${dest.distance.toFixed(2)} km)`;
+        destinationSelect.appendChild(option);
+      });
+    }
+
+    function getRoute() {
+      const selectedDestination = document.getElementById("destination").value;
+      if (!selectedDestination) {
+        alert("目的地を選択してください。");
+        return;
+      }
+
+      const destination = destinations.find(dest => dest.name === selectedDestination);
+
+      // 現在地が取得されていない場合
+      if (!userMarker) {
+        alert("現在地を取得できませんでした。");
+        return;
+      }
+
+      const start = [userMarker.getLatLng().lng, userMarker.getLatLng().lat];  // 現在地 [lng, lat]
+      const end = [destination.lng, destination.lat];  // 目的地 [lng, lat]
+
+      // OpenRouteServiceのAPIキーを設定
+      const apiKey = "5b3ce3597851110001cf62487338421d75c3437b97c6fe3ace881105";  // 自分のAPIキーに置き換えてください
+
+      fetch("https://api.openrouteservice.org/v2/directions/foot-walking/geojson", {
+        method: "POST",
+        headers: {
+          "Authorization": apiKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          coordinates: [start, end]
+        })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (routeLine) map.removeLayer(routeLine);  // 既存のルートがあれば削除
+        routeLine = L.geoJSON(data, {
+          style: { color: "blue", weight: 5 }
+        }).addTo(map);
+        map.fitBounds(routeLine.getBounds());  // ルートに合わせて地図を調整
+      });
+    }
+  </script>
+</body>
+</html>
